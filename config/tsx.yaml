@@ -1,0 +1,12 @@
+editor:
+  icons:
+    .tsx: 󰜈
+  comments:
+    tsx:
+      line:
+        - "//"
+      block:
+        - "/*"
+        - "*/"
+  indents:
+    tsx: "spaces"
