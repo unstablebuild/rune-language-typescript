@@ -1,0 +1,7 @@
+*.tar.gz
+*.tar.xz
+*.zip
+*.swp
+*.rswp
+build/
+downloads/

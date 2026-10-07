@@ -1,0 +1,24 @@
+# One tsgo server serves every dialect, so the package that ships it also
+# installs the grammars of the dialects it does not parse itself.
+requirements:
+  - javascript
+  - tsx
+extensions:
+  typescript:
+    path: '$RUNE_DATADIR/bin/extension_typescript'
+    config:
+      lsp_path: ""
+editor:
+  icons:
+    .ts: 󰛦
+    .mts: 󰛦
+    .cts: 󰛦
+  comments:
+    typescript:
+      line:
+        - "//"
+      block:
+        - "/*"
+        - "*/"
+  indents:
+    typescript: "spaces"
