@@ -10,8 +10,11 @@
 #     those parse as pre-release labels and compare in surprising ways.
 #
 # NOTE: the javascript, tsx and typescript packages supersede the grammar-only
-# ones published from rune-language-template (v0.0.9-1-g58ab44c), so the first
-# release tag must sort above it: start at v0.0.10 or later.
+# ones rune-language-template published (latest v0.0.9-1-g58ab44c). An upload
+# moves a package's latest pointer whatever its version, and Rune offers any
+# latest that differs from the installed one, so ordering is not enforced. Keep
+# these tags above every version published for the three packages and off the
+# template's own v0.0.x line (it has tagged up to v0.0.13): start at v0.1.0.
 set -e
 
 GIT_TAG=$(git describe --tags --dirty)
