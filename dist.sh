@@ -6,8 +6,8 @@
 #
 # Do not run this directly: the make dist-* targets build and test the
 # tarballs first. <env> selects the pinned bluectl project and the
-# per-platform release bucket under deploy/bluectl/. Packages that already
-# have this version are skipped, so an interrupted dist-<env>-all can be rerun.
+# per-platform release bucket under deploy/bluectl/. Packages already released
+# from this commit are skipped, so an interrupted dist-<env>-all can be rerun.
 set -eu
 cd "$(dirname "$0")"
 
@@ -55,8 +55,22 @@ else
 fi
 GIT_LOG=$(git log --pretty=format:"%h: %s" "$GIT_LOG_RANGE")
 
+# Versions are immutable. One released from another commit, say after its tag
+# was moved, fails the platform before any upload: skipping it would leave
+# this env serving a different build than the others under the same version.
+RELEASED=""
 for pkg in $PACKAGES; do
-	if bluectl -c "$BLUECTL_CONFIG_DIR" release describe "$pkg" "$GIT_TAG" >/dev/null 2>&1; then
+	release=$(bluectl -c "$BLUECTL_CONFIG_DIR" release describe "$pkg" "$GIT_TAG" 2>/dev/null) || continue
+	head=$(printf '%s\n' "$release" | awk '$1 == "git-head:" { print $2 }')
+	if [ "$head" != "$GIT_HEAD" ]; then
+		echo "error: $pkg $GIT_TAG is already released for $OS/$ARCH in $ENV from ${head:-an unknown commit}, not $GIT_HEAD; tag a new version" >&2
+		exit 1
+	fi
+	RELEASED="$RELEASED $pkg "
+done
+
+for pkg in $PACKAGES; do
+	if [[ "$RELEASED" == *" $pkg "* ]]; then
 		echo "$pkg $GIT_TAG is already released for $OS/$ARCH in $ENV; skipping"
 		continue
 	fi

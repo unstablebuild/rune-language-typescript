@@ -37,9 +37,9 @@ The release instructions below are for Rune maintainers.
    assesses them.
 2. **Prepare the release.** Fetch tags and submodules
    (`git fetch --tags && git submodule update --init --recursive`), then check
-   out a clean, tagged release commit (`v0.0.10` or later: the grammar-only
-   packages published from rune-language-template are at `v0.0.9-1-g58ab44c`).
-   The `dist-*` targets reject untagged, dirty, or non-semver releases.
+   out a clean, tagged release commit, tagged above every version already
+   published for the three packages (see `check-release-tag.sh`). The `dist-*`
+   targets reject untagged, dirty, or non-semver releases.
    Authenticate `bluectl` via gcloud Application Default Credentials and set
    `BLUE_PGP_KEY` and `BLUE_PGP_KEYRING` (see `bluectl release upload -h`).
    Set `BLUE_PGP_PASSPHRASE` too, or bluectl prompts for it on every upload,
@@ -54,15 +54,19 @@ The release instructions below are for Rune maintainers.
    `dist-<env>-all` builds and tests all four platforms into
    `build/<os>-<arch>/{javascript,tsx,typescript}.tar.gz` and uploads only if
    every one passes. Each platform uploads `javascript` and `tsx` before
-   `typescript`, which requires them. Packages that already have the version
-   are skipped, so an interrupted upload can be rerun with the same target.
+   `typescript`, which requires them. Packages already released from the same
+   commit are skipped, so an interrupted upload can be rerun with the same
+   target; a version released from another commit fails the platform before it
+   uploads anything.
    `dist-<env>-<os>-<arch>` (e.g. `dist-prod-linux-amd64`) releases a single
    platform, and `release-all` / `release-<os>-<arch>` build and test without
-   uploading. `make test` checks
-   for `.go` source leaks, the payload of each package, that `typescript`
-   requires the other two, that the compiler and its `lib.*.d.ts` cannot be
-   published onto `PATH`, the glibc 2.28 and macOS 13.3 floors, and OS-only
-   library dependencies. For macOS it checks that Rune.app can load each
+   uploading. `make test` checks for `.go` source leaks, the payload of each
+   package, that `typescript` requires the other two, that the compiler and its
+   `lib.*.d.ts` cannot be published onto `PATH`, that every binary is built
+   for the target OS and architecture within the glibc 2.28 and macOS 13.3
+   floors, OS-only library dependencies, and that `extension_typescript` is
+   built from the pinned `rune` commit with a clean tree. For macOS it checks
+   that Rune.app can load each
    package: every `tree-sitter.so` is Developer ID-signed and loads into a
    process signed like Rune.app, x86_64 under Rosetta, and every binary is
    intact and validly signed (`scripts/macos-signing.sh`, shared by every
@@ -77,8 +81,12 @@ To move to a new TypeScript release, bump `TS_VERSION` in the `Makefile`. To
 move the grammars, update the `tree-sitter-javascript` and
 `tree-sitter-typescript` submodules together with the `rune` submodule: the
 queries ship from Rune's syntax test fixtures
-(`rune/internal/ide/syntax/syntaxtest/<lang>/`), and Rune's syntax suite tests
-them against parsers built from the same grammar revisions.
+(`rune/internal/ide/syntax/syntaxtest/<lang>/`). Rune's syntax suite tests them
+against the prebuilt `tree-sitter.so` fixtures next to them, not against the
+grammars built here, so after moving either run the suite against the built
+grammars: copy each `build/darwin-arm64/pkg/<lang>/lib/tree-sitter.so` over
+its fixture, run `go test -run TestTypeScript ./internal/ide/syntax/syntaxtest/`
+in `rune`, then restore the fixtures with `git -C rune checkout -- internal`.
 
 ## Payload layout
 
@@ -96,17 +104,20 @@ typescript/
 
 Three non-obvious invariants, all consequences of how the installer publishes
 a package: it symlinks the version dir at `$RUNE_DATADIR/lib/<pkg-id>` and
-**byte-copies every non-hidden executable** it finds, by base name, into the
-shared `$RUNE_DATADIR/bin`.
+byte-copies executables, by base name, into the shared `$RUNE_DATADIR/bin`.
+Rune v1.3.0 and later copy only the non-hidden ones in `bin/`; **earlier
+releases copy every non-hidden executable** in the package, and the packages
+must install on those too.
 
 1. **The real compiler is hidden (`tsgo/.tsgo`); PATH gets a shim.** The
    compiler reads its `lib.*.d.ts` from the directory of its own executable
    and panics when they are missing, so it must run from inside the package
    next to them. A non-hidden compiler would be flat-copied into
-   `$RUNE_DATADIR/bin` severed from them. Hidden files are skipped, so only the
-   `tsgo-shim.sh` wrapper (staged as `bin/tsgo`) is published. It execs the
-   hidden binary from either of its two install locations. The `lib.*.d.ts`
-   are stripped of exec bits for the same reason.
+   `$RUNE_DATADIR/bin` severed from them by Rune releases before v1.3.0.
+   Hidden files are skipped, so only the `tsgo-shim.sh` wrapper (staged as
+   `bin/tsgo`) is published. It execs the hidden binary from either of its two
+   install locations. The `lib.*.d.ts` are stripped of exec bits for the same
+   reason.
 2. **The shim is named `tsgo`, not `tsc`.** A `tsc` in `$RUNE_DATADIR/bin`
    would shadow the `tsc` a project installs, which is usually an older,
    Node-based TypeScript that its build depends on. `extension_typescript`

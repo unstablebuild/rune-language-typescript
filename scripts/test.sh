@@ -13,25 +13,31 @@
 #   3. typescript's config.yaml requires the javascript and tsx packages:
 #      its server handles those dialects, but their grammars ship in them.
 #   4. The real compiler is hidden (tsgo/.tsgo), and the only non-hidden
-#      executables outside bin/ are the grammars. The installer flat-copies
-#      every non-hidden executable into the shared $RUNE_DATADIR/bin, so a
-#      visible compiler would land there severed from its lib.*.d.ts, and an
-#      executable lib.*.d.ts would land on PATH.
-#   5. Binaries meet the platform floors on docs.rune.build: Mach-O minos <=
-#      $MACOS_MIN, ELF glibc symbol versions <= $GLIBC_MIN. They link nothing
-#      beyond the OS: glibc's own libraries on Linux, /usr/lib and /System on
-#      macOS.
-#   6. macOS targets: Rune.app can load every package. Each tree-sitter.so is
+#      executables outside bin/ are the grammars. Rune releases before v1.3.0
+#      flat-copy every non-hidden executable into the shared $RUNE_DATADIR/bin,
+#      so a visible compiler would land there severed from its lib.*.d.ts, and
+#      an executable lib.*.d.ts would land on PATH.
+#   5. Binaries are built for $TARGET_OS/$TARGET_ARCH and meet the platform
+#      floors on docs.rune.build: Mach-O minos <= $MACOS_MIN, ELF glibc symbol
+#      versions <= $GLIBC_MIN. They link nothing beyond the OS: glibc's own
+#      libraries on Linux, /usr/lib and /System on macOS. A binary for another
+#      architecture would pass the other guards: Rosetta runs x86_64 code on
+#      Apple silicon, and the other platforms' binaries are never run.
+#   6. extension_typescript is built from the pinned rune commit ($RUNE_REV)
+#      without cgo. Its Go build info must not record a modified tree:
+#      check-release-tag.sh only sees tracked changes in the submodule, and an
+#      untracked .go file in it would be compiled in.
+#   7. macOS targets: Rune.app can load every package. Each tree-sitter.so is
 #      signed with the $TEAM_ID Developer ID and loads into a process signed
 #      like Rune.app, and every Mach-O file, the Microsoft-signed compiler
 #      included, is intact and validly signed (scripts/macos-signing.sh check).
-#   7. The bin/tsgo shim runs the compiler from both install locations: the
+#   8. The bin/tsgo shim runs the compiler from both install locations: the
 #      package's own bin/ and the shared $RUNE_DATADIR/bin (simulated with a
 #      fake data dir + lib/typescript symlink). Through the shared one, the
 #      compiler reports $TS_VERSION, type-checks a project against the
 #      packaged lib.*.d.ts, and serves LSP over stdio as Rune runs it.
 #
-# Guard 7 executes the packaged binaries, so it only runs when RUN_BINARIES=1
+# Guard 8 executes the packaged binaries, so it only runs when RUN_BINARIES=1
 # (the tarballs target the host platform).
 set -euo pipefail
 
@@ -42,6 +48,7 @@ TARGET_ARCH="${TARGET_ARCH:?}"
 TS_VERSION="${TS_VERSION:?}"
 MACOS_MIN="${MACOS_MIN:?}"
 GLIBC_MIN="${GLIBC_MIN:?}"
+RUNE_REV="${RUNE_REV:?}"
 RUN_BINARIES="${RUN_BINARIES:-0}"
 if [ "$TARGET_OS" = darwin ]; then
 	TEAM_ID="${TEAM_ID:?}"
@@ -62,9 +69,25 @@ sort_versions() { sort -t. -k1,1n -k2,2n -k3,3n; }
 # version_le A B: true if dotted version A <= B.
 version_le() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort_versions | head -1)" = "$1" ]; }
 
+# file(1)'s description of a binary built for the target. A universal Mach-O
+# file is described as "Mach-O universal binary", so it does not match.
+case "$TARGET_OS-$TARGET_ARCH" in
+darwin-arm64) want_binary="Mach-O 64-bit * arm64" ;;
+darwin-amd64) want_binary="Mach-O 64-bit * x86_64" ;;
+linux-arm64) want_binary="ELF 64-bit LSB *, ARM aarch64, *" ;;
+linux-amd64) want_binary="ELF 64-bit LSB *, x86-64, *" ;;
+*) fail "unsupported target $TARGET_OS-$TARGET_ARCH" ;;
+esac
+
 # check_floor <pkg> <file>: guard 5 for one binary of an extracted package.
 check_floor() {
-	local f=$2 minos glibc foreign
+	local f=$2 desc minos glibc foreign
+	desc="$(file -b "$f")"
+	# shellcheck disable=SC2254 # want_binary is a pattern.
+	case "$desc" in
+	$want_binary) ;;
+	*) fail "$1: ${f#"$workdir"/} is not a $TARGET_OS-$TARGET_ARCH binary: $desc" ;;
+	esac
 	case "$TARGET_OS" in
 	darwin)
 		minos="$(otool -l "$f" | awk '$1 == "minos" {print $2}' | sort_versions | tail -1)"
@@ -90,6 +113,8 @@ check_floor() {
 	fi
 }
 
+command -v file > /dev/null || fail "file is required to check binary architectures"
+command -v go > /dev/null || fail "go is required to read extension_typescript's build info"
 if [ "$TARGET_OS" = linux ]; then
 	command -v objdump > /dev/null || fail "objdump is required to check glibc floors"
 fi
@@ -139,7 +164,7 @@ for pkg in $PACKAGES; do
 		check_floor "$pkg" "$dir/$f"
 	done
 
-	echo "ok: $pkg payload present, no .go files, executables hidden, $TARGET_OS floors met"
+	echo "ok: $pkg payload present, no .go files, executables hidden, $TARGET_OS-$TARGET_ARCH binaries within floors"
 done
 
 # Guard 3: a top-level `requirements:` list naming both grammar packages.
@@ -151,6 +176,18 @@ if [ "$requirements" != "javascript tsx" ]; then
 	fail "typescript's config.yaml requires '$requirements', expected 'javascript tsx'"
 fi
 echo "ok: typescript requires the javascript and tsx packages"
+
+# Guard 6: `go version -m` prints one "build" line per setting, e.g.
+# "<tab>build<tab>vcs.modified=false". Kept in a file for grep -q (see above).
+buildinfo="$workdir/extension_typescript.buildinfo"
+go version -m "$workdir/typescript/bin/extension_typescript" |
+	awk '$1 == "build" { print $2 }' > "$buildinfo"
+for want in "GOOS=$TARGET_OS" "GOARCH=$TARGET_ARCH" CGO_ENABLED=0 \
+	"vcs.revision=$RUNE_REV" vcs.modified=false; do
+	grep -qxF "$want" "$buildinfo" ||
+		fail "extension_typescript's build info lacks $want: $(xargs < "$buildinfo")"
+done
+echo "ok: extension_typescript is built from rune ${RUNE_REV:0:12} with a clean tree and no cgo"
 
 if [ "$TARGET_OS" = darwin ]; then
 	for pkg in $PACKAGES; do

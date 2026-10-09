@@ -157,6 +157,7 @@ tarballs: sign
 test: tarballs
 	BUILD=$(BUILD) PACKAGES="$(PACKAGES)" TARGET_OS=$(TARGET_OS) TARGET_ARCH=$(TARGET_ARCH) \
 		TS_VERSION=$(TS_VERSION) MACOS_MIN=$(MACOS_MIN) GLIBC_MIN=$(GLIBC_MIN) \
+		RUNE_REV=$$(git -C rune rev-parse HEAD) \
 		TEAM_ID=$(TEAM_ID) CODESIGN_IDENTITY="$(CODESIGN_IDENTITY)" \
 		RUN_BINARIES=$(if $(filter $(HOST_OS)-$(HOST_ARCH),$(PLATFORM)),1,0) \
 		./scripts/test.sh
