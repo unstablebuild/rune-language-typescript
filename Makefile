@@ -134,8 +134,11 @@ package: $(TS_TARBALL)
 	chmod a-x $(TS_PKG)/tsgo/*
 	install -m 0755 $(BUILD)/npm/lib/tsc $(TS_PKG)/tsgo/.tsgo
 	install -m 0755 tsgo-shim.sh $(TS_PKG)/bin/tsgo
+	# debug.Tag is the version Rune shows when asking to run the extension;
+	# it matches the tag dist.sh uploads as.
 	cd rune && CGO_ENABLED=0 GOOS=$(TARGET_OS) GOARCH=$(TARGET_ARCH) \
-		go build -o $(CURDIR)/$(TS_PKG)/bin/extension_typescript ./cmd/extension_typescript
+		go build -ldflags="-X unstable.build/rune/internal/debug.Tag=$(shell git describe --tags --dirty)" \
+		-o $(CURDIR)/$(TS_PKG)/bin/extension_typescript ./cmd/extension_typescript
 
 # Developer ID-sign each tree-sitter.so in a macOS package, the one file Rune
 # loads into its own process. The other binaries keep the signatures their
